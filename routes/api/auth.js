@@ -2,39 +2,10 @@ const express = require('express');
 const router = express.Router();
 const cors = require('cors');
 const passport = require('passport');
-const LocalStrategy = require('passport-local').Strategy;
 const bcrypt = require('bcryptjs');
 
 // Models
 const User = require('../../models/User');
-
-passport.use(
-	new LocalStrategy(async function verify(username, password, cb) {
-		const exists = await User.exists({ username: username });
-
-		if (!exists) {
-			return cb(null, false, { message: 'Incorrect username or password.' });
-		} else {
-			try {
-				const user = await User.findOne({ username: username });
-				const isMatch = await bcrypt.compare(password, user.password);
-				return cb(null, user);
-			} catch (error) {
-				console.log(error);
-				return cb(null, false, { message: 'Incorrect username or password.' });
-			}
-		}
-	})
-);
-
-// Serialized and deserialized methods when got from session
-passport.serializeUser(function(user, done) {
-	done(null, user);
-});
-
-passport.deserializeUser(function(user, done) {
-	done(null, user);
-});
 
 // Routes
 router.post('/signup', cors(), async (req, res) => {
@@ -44,7 +15,29 @@ router.post('/signup', cors(), async (req, res) => {
 		const exists = await User.exists({ username: username });
 
 		if (exists) {
-			return res.status(400).json({ error: 'Username already exists' });
+			return res.status(400).json({ error: 'Username already exists.' });
+		}
+
+		// We handle password validation here since the User Model accepts a hashed password which can be empty.
+		// We are using the same object structure as mongoose.
+		if (password === '') {
+			return res.status(400).json({
+				errors: {
+					password: {
+						message: 'Password is required'
+					}
+				}
+			});
+		}
+
+		if (password.length <= 5) {
+			return res.status(400).json({
+				errors: {
+					password: {
+						message: 'Password must be at least 6 characters.'
+					}
+				}
+			});
 		}
 
 		const newUser = new User({
@@ -54,28 +47,48 @@ router.post('/signup', cors(), async (req, res) => {
 		});
 
 		bcrypt.genSalt(10, (err, salt) => {
-			bcrypt.hash(newUser.password, salt, (err, hash) => {
+			bcrypt.hash(newUser.password, salt, async (err, hash) => {
 				if (err) throw err;
 				newUser.password = hash;
+
+				try {
+					const response = await newUser.save();
+
+					if (response) {
+						return res.status(200).json(response);
+					}
+				} catch (error) {
+					res.status(400).json(error);
+				}
 			});
 		});
-
-		const response = await newUser.save();
-
-		if (response) {
-			return res.status(200).json(response);
-		}
 	} catch (error) {
 		console.log(error);
 	}
 });
 
-router.post('/login', cors(), passport.authenticate('local', { failureMessage: true }), async (req, res) => {
-	req.res.status(200).json({ authenticated: req.isAuthenticated() });
+router.post('/login', cors(), async (req, res, next) => {
+	passport.authenticate('local', (err, user, info) => {
+		if (err) {
+			return next(err); // will generate a 500 error
+		}
+		// Generate a JSON response reflecting authentication status
+		if (!user) {
+			return res.status(401).json({ success: false, error: info });
+		}
+		req.login(user, function(err) {
+			if (err) {
+				return next(err);
+			}
+			console.log('Success');
+			return res.status(200).json({ success: true, authenticated: req.isAuthenticated(), user: req.user });
+		});
+	})(req, res, next);
 });
 
-router.get('/test', cors(), async (req, res) => {
-	res.status(200).json({ test: 'Auth route test', authenticated: req.isAuthenticated() });
+router.get('/getUser', cors(), async (req, res) => {
+	console.log(req.user);
+	res.status(200).json({ authenticated: req.isAuthenticated(), user: req.user });
 });
 
 router.post('/logout', cors(), async (req, res) => {
