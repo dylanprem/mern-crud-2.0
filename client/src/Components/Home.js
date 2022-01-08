@@ -38,6 +38,8 @@ function Home() {
 						</Link>
 					)}{' '}
 				</div>
+				<h1 className="text-secondary mt-3">Built with:</h1>
+				<p className="text-light">MERN stack | Passport.js | The Cat API</p>
 			</Col>
 		</Row>
 	);
